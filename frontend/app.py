@@ -5,32 +5,66 @@ import streamlit as st
 import io, json, sqlite3
 from pathlib import Path
 import pandas as pd
-from src import parsers, matching, scorer
+from docx import Document
+from fuzzywuzzy import fuzz
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 
-# Create directories if not exist
+# -------------------- Directories --------------------
 os.makedirs('data/resumes', exist_ok=True)
 
-# Page config & background styling
+# -------------------- Page Config --------------------
 st.set_page_config(page_title="Automated Resume Relevance Dashboard", layout="wide")
-page_bg = """
+st.markdown("""
 <style>
 body {background-color: #f0f2f6;}
 section.main {background-color: #ffffff; border-radius:15px; padding:20px; box-shadow: 0px 0px 15px rgba(0,0,0,0.1);}
 h1,h2,h3{color:#1f77b4;}
 </style>
-"""
-st.markdown(page_bg, unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 st.title("📄 Automated Resume Relevance Dashboard")
 
-# Sidebar menu
 menu = st.sidebar.selectbox(
-    "Menu", 
+    "Menu",
     ["Placement Team: Upload JD", "Students: Upload Resume", "Shortlist Dashboard", "Help / Samples"]
 )
 
 DB_PATH = "results.db"
 
-# ------------------- Placement Team JD Upload -------------------
+# -------------------- Utilities --------------------
+def extract_docx_text(file_path):
+    doc = Document(file_path)
+    return "\n".join([p.text for p in doc.paragraphs])
+
+def normalize_text(text):
+    return text.lower().replace('\n',' ').strip()
+
+def parse_jd(jd_text):
+    lines = jd_text.splitlines()
+    title = lines[0] if lines else "Role"
+    must_have_skills = [line.strip() for line in lines[1:] if line.strip()]
+    return {"role_title": title, "must_have_skills": must_have_skills, "good_to_have_skills": [], "qualifications": []}
+
+def hard_match(resume_text, jd_parsed):
+    missing = []
+    for skill in jd_parsed.get('must_have_skills', []):
+        if skill.lower() not in resume_text:
+            missing.append(skill)
+    score = max(0, 100 - len(missing)*10)
+    return score, missing
+
+def semantic_score(resume_text, jd_text):
+    vectorizer = TfidfVectorizer()
+    vectors = vectorizer.fit_transform([resume_text, jd_text])
+    sim = cosine_similarity(vectors[0:1], vectors[1:2])[0][0]
+    return int(sim*100)
+
+def compute_final_score(hard_score, sem_score):
+    final = int(0.6*hard_score + 0.4*sem_score)
+    verdict = "High" if final>=75 else "Medium" if final>=50 else "Low"
+    return {"score": final, "verdict": verdict}
+
+# -------------------- Placement Team JD Upload --------------------
 if menu == "Placement Team: Upload JD":
     st.header("Upload Job Description (Placement Team)")
     with st.form("jd_form"):
@@ -62,55 +96,59 @@ if menu == "Placement Team: Upload JD":
                 conn.close()
                 st.success(f"JD uploaded successfully with ID: {jd_id}")
 
-# ------------------- Student Resume Upload & Parsing -------------------
+# -------------------- Student Resume Upload & Evaluation --------------------
 if menu == "Students: Upload Resume":
-    st.header("Resume Upload (Students)")
-    
+    st.header("Upload Resume (Students)")
+
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
-    cur.execute("CREATE TABLE IF NOT EXISTS jds (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, content TEXT)")
     cur.execute("CREATE TABLE IF NOT EXISTS evaluations (id INTEGER PRIMARY KEY AUTOINCREMENT, jd_id INTEGER, resume_name TEXT, score INTEGER, verdict TEXT, missing TEXT)")
     cur.execute("SELECT id, title, content FROM jds")
     jds = cur.fetchall()
     conn.close()
 
-    if not jds:
-        st.warning("No job requirements available. Please wait for Placement Team to upload JD.")
-    else:
-        jd_dict = {f"{row[1]} (ID:{row[0]})": (row[0], row[2]) for row in jds}
+    resume_file = st.file_uploader("Upload Resume (DOCX/TXT)", type=['docx','txt'])
+
+    jd_available = len(jds) > 0
+    jd_dict = {f"{row[1]} (ID:{row[0]})": (row[0], row[2]) for row in jds} if jd_available else {}
+
+    if jd_available:
         jd_sel = st.selectbox("Select Job Requirement", list(jd_dict.keys()))
-        resume_file = st.file_uploader("Upload Resume (PDF/DOCX/TXT)", type=['pdf','docx','txt'])
+    else:
+        st.info("No JD posted yet. You can still upload your resume to get general skill improvement suggestions.")
+        jd_sel = None
 
-        if st.button("Parse & Evaluate") and resume_file:
-            resume_path = os.path.join("data/resumes", resume_file.name)
-            with open(resume_path,'wb') as f:
-                f.write(resume_file.getvalue())
-            
-            # Resume Parsing
-            resume_text = parsers.extract_text(resume_path)
-            resume_text = parsers.normalize_text(resume_text)
+    if st.button("Parse & Evaluate") and resume_file:
+        resume_path = os.path.join("data/resumes", resume_file.name)
+        with open(resume_path,'wb') as f:
+            f.write(resume_file.getvalue())
 
-            # JD Parsing
+        # Resume Parsing
+        if resume_file.name.endswith(".docx"):
+            resume_text = extract_docx_text(resume_path)
+        else:
+            resume_text = open(resume_path,'r',encoding='utf-8').read()
+        resume_text = normalize_text(resume_text)
+
+        missing = []
+        final_score = 0
+        verdict = "No JD"
+        suggestions = []
+
+        if jd_available:
             jd_id, jd_content = jd_dict[jd_sel]
-            jd_parsed = parsers.parse_jd(jd_content)
+            jd_parsed = parse_jd(jd_content)
+            jd_text = normalize_text(jd_content)
 
-            st.subheader("Parsed JD Details")
-            st.write(f"**Role Title:** {jd_parsed.get('role_title','')}")
-            st.write(f"**Must-have Skills:** {', '.join(jd_parsed.get('must_have_skills',[]))}")
-            st.write(f"**Good-to-have Skills:** {', '.join(jd_parsed.get('good_to_have_skills',[]))}")
-            st.write(f"**Qualifications:** {', '.join(jd_parsed.get('qualifications',[]))}")
+            # Hard & Semantic Match
+            hard_score, missing = hard_match(resume_text, jd_parsed)
+            sem_score = semantic_score(resume_text, jd_text)
+            scored = compute_final_score(hard_score, sem_score)
+            scored['missing'] = missing
 
-            # Hard Match
-            hard = matching.hard_match(resume_text, jd_parsed)
+            final_score = scored['score']
+            verdict = scored['verdict']
 
-            # Semantic Match
-            sem = matching.semantic_similarity(resume_text, jd_content)
-
-            # Scoring & Verdict
-            scored = scorer.compute_final_score(hard, sem)
-
-            # Suggestions
-            suggestions = []
             if scored['verdict'] != 'High':
                 if scored['missing']:
                     suggestions.append(f"Missing skills/projects: {', '.join(scored['missing'])}")
@@ -120,34 +158,37 @@ if menu == "Students: Upload Resume":
             conn = sqlite3.connect(DB_PATH)
             cur = conn.cursor()
             cur.execute("INSERT INTO evaluations (jd_id, resume_name, score, verdict, missing) VALUES (?, ?, ?, ?, ?)",
-                        (jd_id, resume_file.name, scored['score'], scored['verdict'], json.dumps(scored['missing'])))
+                        (jd_id, resume_file.name, final_score, verdict, json.dumps(scored['missing'])))
             conn.commit()
             conn.close()
+        else:
+            # General suggestions when no JD
+            suggestions.append("JD not posted yet. Focus on including key skills, projects, and certifications relevant to your field.")
 
-            # Display Results
-            st.subheader("Evaluation Results")
-            st.metric("Relevance Score", scored['score'])
-            st.markdown(f"**Verdict:** <span style='color:{'green' if scored['verdict']=='High' else 'orange' if scored['verdict']=='Medium' else 'red'};'>{scored['verdict']}</span>", unsafe_allow_html=True)
-            if scored['missing']:
-                st.write("Missing Skills/Projects/Certifications:")
-                for item in scored['missing']:
-                    st.markdown(f"<span style='color:red; font-weight:bold'>● {item}</span>", unsafe_allow_html=True)
-            if suggestions:
-                st.write("Suggestions for Improvement:")
-                for s in suggestions:
-                    st.write(f"- {s}")
+        # Display Results
+        st.subheader("Evaluation Results")
+        if jd_available:
+            st.metric("Relevance Score", final_score)
+            st.markdown(f"**Verdict:** <span style='color:{'green' if verdict=='High' else 'orange' if verdict=='Medium' else 'red'};'>{verdict}</span>", unsafe_allow_html=True)
+        else:
+            st.info("JD not available. General suggestions are provided below.")
+        
+        if missing:
+            st.write("Missing Skills/Projects/Certifications:")
+            for item in missing:
+                st.markdown(f"<span style='color:red; font-weight:bold'>● {item}</span>", unsafe_allow_html=True)
+        if suggestions:
+            st.write("Suggestions for Improvement:")
+            for s in suggestions:
+                st.write(f"- {s}")
 
-# ------------------- Shortlist Dashboard -------------------
+# -------------------- Shortlist Dashboard --------------------
 if menu == "Shortlist Dashboard":
     st.header("Shortlist Dashboard")
     st.info("Filter resumes by Job Title, Company, Location, and Minimum Score")
-    
+
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
-    # Ensure tables exist
-    cur.execute("CREATE TABLE IF NOT EXISTS jds (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, content TEXT)")
-    cur.execute("CREATE TABLE IF NOT EXISTS evaluations (id INTEGER PRIMARY KEY AUTOINCREMENT, jd_id INTEGER, resume_name TEXT, score INTEGER, verdict TEXT, missing TEXT)")
-    
     try:
         cur.execute("""
             SELECT e.id, j.title, e.resume_name, e.score, e.verdict, e.missing 
@@ -194,7 +235,7 @@ if menu == "Shortlist Dashboard":
                     st.markdown(f"<span style='color:red; font-weight:bold'>● {item}</span>", unsafe_allow_html=True)
             st.markdown("---")
 
-# ------------------- Help / Samples -------------------
+# -------------------- Help / Samples --------------------
 if menu == "Help / Samples":
     st.header("Help & Sample Data")
     st.write("Sample data included in `data/sample/`. Upload JD first, then student resumes to evaluate.")
