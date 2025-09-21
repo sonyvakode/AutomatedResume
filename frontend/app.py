@@ -1,51 +1,60 @@
 import streamlit as st
-import os, json, sqlite3
+import os, io, json, sqlite3
+from pathlib import Path
 from src import parsers, matching, scorer, db
+import pandas as pd
 
+# Initialize DB
 db.init_db()
-st.set_page_config(page_title="Resume Relevance Checker", layout="wide")
-st.title("📄 Automated Resume Relevance Checker")
 
-menu = st.sidebar.selectbox("Menu", ["Placement Team: Upload JD", "Students: Upload Resume", "Dashboard"])
+st.set_page_config(page_title="Resume Relevance Dashboard", layout="wide")
+st.title("📄 Automated Resume Relevance Check — Dashboard")
 
-# ---------------- Placement Team: JD Upload ----------------
-if menu=="Placement Team: Upload JD":
-    st.header("Job Requirement Upload - Placement Team")
+menu = st.sidebar.selectbox(
+    "Menu", 
+    ["Placement Team: Upload JD", "Students: Upload Resume", "Shortlist Dashboard", "Help / Samples"]
+)
+
+# ------------------ JD Upload ------------------
+if menu == "Placement Team: Upload JD":
+    st.header("Upload Job Description (Placement Team)")
     with st.form("jd_form"):
         title = st.text_input("Job Title")
         company = st.text_input("Company Name")
         location = st.text_input("Location")
-        jd_file = st.file_uploader("Upload Job Description (.txt)", type=['txt'])
-        submitted = st.form_submit_button("Save JD")
+        jd_txt = st.text_area("Paste JD text here", height=200)
+        jd_file = st.file_uploader("Or upload JD file (.txt/.md)", type=['txt','md'])
+        submitted = st.form_submit_button("Upload JD")
         if submitted:
-            if jd_file is None or not title.strip() or not company.strip() or not location.strip():
-                st.error("Please fill all fields and upload JD file")
+            if jd_file is not None:
+                jd_txt = jd_file.getvalue().decode('utf-8', errors='ignore')
+            if not jd_txt.strip() or not title.strip() or not company.strip() or not location.strip():
+                st.error("Please provide all details and JD content/file.")
             else:
-                content = jd_file.getvalue().decode('utf-8', errors='ignore')
-                jd_id = db.save_jd(f"{title} | {company} | {location}", content)
-                st.success(f"JD saved with ID: {jd_id}")
+                jd_full_title = f"{title} | {company} | {location}"
+                jd_id = db.save_jd(jd_full_title, jd_txt)
+                st.success(f"JD uploaded successfully with ID: {jd_id}")
 
-# ---------------- Students: Resume Upload ----------------
-if menu=="Students: Upload Resume":
-    st.header("Resume Upload - Students")
+# ------------------ Student Resume Upload ------------------
+if menu == "Students: Upload Resume":
+    st.header("Resume Upload (Students)")
     jds = db.get_jds()
     jd_dict = {f"{row[1]} (ID:{row[0]})": row[0] for row in jds}
     if not jd_dict:
-        st.warning("No Job Requirements found. Please wait for placement team to upload JD.")
+        st.warning("No job requirements available. Please wait for Placement Team to upload JD.")
     else:
         jd_sel = st.selectbox("Select Job Requirement", list(jd_dict.keys()))
         resume_file = st.file_uploader("Upload Resume (PDF/DOCX/TXT)", type=['pdf','docx','txt'])
         if st.button("Evaluate") and resume_file:
-            # Save resume temporarily
             os.makedirs("data/resumes", exist_ok=True)
             resume_path = os.path.join("data/resumes", resume_file.name)
             with open(resume_path,'wb') as f:
                 f.write(resume_file.getvalue())
             
-            # Extract and normalize resume text
+            # Extract text
             resume_text = parsers.extract_text(resume_path)
             resume_text = parsers.normalize_text(resume_text)
-            
+
             # Get JD content
             jd_id = jd_dict[jd_sel]
             conn = sqlite3.connect('data/results.db')
@@ -53,30 +62,30 @@ if menu=="Students: Upload Resume":
             cur.execute("SELECT content FROM jds WHERE id=?",(jd_id,))
             jd_content = cur.fetchone()[0]
             conn.close()
-            
+
             # Parse JD
             jd_parsed = parsers.parse_jd(jd_content)
-            
+
             # Step 1: Hard Match
             hard = matching.hard_match(resume_text, jd_parsed)
-            
+
             # Step 2: Semantic Match
             sem = matching.semantic_similarity(resume_text, jd_content)
-            
+
             # Step 3: Scoring & Verdict
             scored = scorer.compute_final_score(hard, sem)
-            
-            # Generate suggestions
+
+            # Suggestions
             suggestions = []
             if scored['verdict'] != 'High':
                 if scored['missing']:
                     suggestions.append(f"Consider acquiring or highlighting skills: {', '.join(scored['missing'])}")
                 suggestions.append("Enhance resume with projects, certifications, and quantified achievements")
-            
+
             # Save evaluation
             db.save_evaluation(jd_id, resume_file.name, scored['score'], scored['verdict'], scored['missing'])
-            
-            # Display Results
+
+            # Display results
             st.subheader("Evaluation Results")
             st.metric("Relevance Score", scored['score'])
             st.write("Verdict:", scored['verdict'])
@@ -89,17 +98,16 @@ if menu=="Students: Upload Resume":
                 for s in suggestions:
                     st.write(f"- {s}")
 
-# ---------------- Dashboard ----------------
-if menu=="Dashboard":
-    st.header("Placement Team Dashboard")
-    st.info("Search and filter resumes by Job Title, Company, Location, and Minimum Score.")
+# ------------------ Shortlist Dashboard ------------------
+if menu == "Shortlist Dashboard":
+    st.header("Shortlist Dashboard")
+    st.info("Filter resumes by Job Title, Company, Location, and Minimum Score")
     evals = db.get_evaluations()
     if not evals:
         st.info("No evaluations yet.")
     else:
-        import pandas as pd
         df = pd.DataFrame(evals, columns=["ID","JD Title","Resume","Score","Verdict","Missing"])
-        # Split JD Title into components for filtering
+        # Split JD Title into components
         df[['Job Title','Company','Location']] = df['JD Title'].str.split('|', expand=True)
         df['Job Title'] = df['Job Title'].str.strip()
         df['Company'] = df['Company'].str.strip()
@@ -118,16 +126,30 @@ if menu=="Dashboard":
             (df['Location'].isin(location_filter)) &
             (df['Score'] >= score_filter)
         ]
-        
-        # Display Data with badges for missing skills
+
         st.write(f"Total Evaluations: {len(df_filtered)}")
         for idx, row in df_filtered.iterrows():
             st.markdown(f"### Resume: {row['Resume']}")
             st.markdown(f"**Job:** {row['Job Title']} | **Company:** {row['Company']} | **Location:** {row['Location']}")
-            st.markdown(f"**Score:** {row['Score']} | **Verdict:** {row['Verdict']}")
+            st.markdown(f"**Score:** {row['Score']} | **Verdict:** "
+                        f"<span style='color:{'green' if row['Verdict']=='High' else 'orange' if row['Verdict']=='Medium' else 'red'};'>{row['Verdict']}</span>", 
+                        unsafe_allow_html=True)
             if row['Missing']:
                 missing = json.loads(row['Missing'])
                 st.markdown("**Missing Skills/Projects/Certifications:**")
                 for item in missing:
                     st.markdown(f"<span style='color:red; font-weight:bold'>● {item}</span>", unsafe_allow_html=True)
             st.markdown("---")
+
+# ------------------ Help / Samples ------------------
+if menu == "Help / Samples":
+    st.header("Help & Sample Data")
+    st.write("Sample data included in `data/sample/`. Upload JD, then student can upload resumes to evaluate.")
+    sample_jd_path = Path('data/sample/job_description.txt')
+    sample_resume_path = Path('data/sample/sample_resume.txt')
+    if sample_jd_path.exists():
+        st.subheader("Sample JD")
+        st.code(sample_jd_path.read_text())
+    if sample_resume_path.exists():
+        st.subheader("Sample Resume")
+        st.code(sample_resume_path.read_text())
