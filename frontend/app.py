@@ -8,6 +8,7 @@ import pandas as pd
 from docx import Document
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+import PyPDF2
 
 # -------------------- Directories --------------------
 os.makedirs('data/resumes', exist_ok=True)
@@ -54,6 +55,16 @@ DB_PATH = "results.db"
 def extract_docx_text(file_path):
     doc = Document(file_path)
     return "\n".join([p.text for p in doc.paragraphs])
+
+def extract_pdf_text(file_path):
+    text = ""
+    with open(file_path, "rb") as f:
+        reader = PyPDF2.PdfReader(f)
+        for page in reader.pages:
+            page_text = page.extract_text()
+            if page_text:
+                text += page_text + "\n"
+    return text
 
 def normalize_text(text):
     return text.lower().replace('\n',' ').strip()
@@ -124,7 +135,7 @@ if menu == "Students: Upload Resume":
     jds = cur.fetchall()
     conn.close()
 
-    resume_file = st.file_uploader("Upload Resume (DOCX/TXT)", type=['docx','txt'])
+    resume_file = st.file_uploader("Upload Resume (DOCX/TXT/PDF)", type=['docx','txt','pdf'])
     jd_dict = {f"{row[1]} (ID:{row[0]})": (row[0], row[2]) for row in jds} if jds else {}
     jd_available = bool(jd_dict)
 
@@ -138,7 +149,13 @@ if menu == "Students: Upload Resume":
             with open(resume_path,'wb') as f:
                 f.write(resume_file.getvalue())
 
-            resume_text = extract_docx_text(resume_path) if resume_file.name.endswith(".docx") else open(resume_path,'r',encoding='utf-8').read()
+            file_ext = resume_file.name.split('.')[-1].lower()
+            if file_ext == "docx":
+                resume_text = extract_docx_text(resume_path)
+            elif file_ext == "pdf":
+                resume_text = extract_pdf_text(resume_path)
+            else:
+                resume_text = open(resume_path,'r',encoding='utf-8').read()
             resume_text = normalize_text(resume_text)
 
             missing, final_score, verdict, suggestions = [], 0, "No JD", []
@@ -156,9 +173,9 @@ if menu == "Students: Upload Resume":
                 final_score = scored['score']
                 verdict = scored['verdict']
 
+                # Concise suggestions only
                 if scored['verdict'] != 'High' and scored['missing']:
-                    suggestions.append(f"Missing skills/projects: {', '.join(scored['missing'])}")
-                    suggestions.append("Add relevant certifications or projects to improve relevance.")
+                    suggestions = [f"Add: {', '.join(scored['missing'])}"]
 
                 conn = sqlite3.connect(DB_PATH)
                 cur = conn.cursor()
@@ -167,7 +184,7 @@ if menu == "Students: Upload Resume":
                 conn.commit()
                 conn.close()
             else:
-                suggestions.append("JD not posted yet. Include key skills, projects, and certifications relevant to your field.")
+                suggestions = ["Focus on key skills and relevant projects."]
 
             st.subheader("Evaluation Results")
             if jd_available:
@@ -176,11 +193,8 @@ if menu == "Students: Upload Resume":
             else:
                 st.info("JD not available. General suggestions provided.")
 
-            if missing:
-                st.write("Missing Skills/Projects/Certifications:")
-                for item in missing: st.write(f"● {item}")
             if suggestions:
-                st.write("Suggestions for Improvement:")
+                st.write("Suggestions:")
                 for s in suggestions: st.write(f"- {s}")
 
 # -------------------- Shortlist Dashboard --------------------
@@ -209,11 +223,10 @@ if menu == "Shortlist Dashboard":
         df = df.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
         df['Shortlisted'] = df['Verdict'].apply(lambda v: "YES" if v in ["High", "Medium"] else "NO")
 
-        # Filters
         col1, col2, col3 = st.columns(3)
-        with col1: role_filter = st.multiselect("Filter by Role", options=sorted(df['Job Title'].unique().tolist()), default=[])
-        with col2: loc_filter = st.multiselect("Filter by Location", options=sorted(df['Location'].unique().tolist()), default=[])
-        with col3: shortlist_filter = st.selectbox("Shortlisted Only?", options=["All", "YES", "NO"])
+        with col1: role_filter = st.multiselect("Filter by Role", sorted(df['Job Title'].unique()), [])
+        with col2: loc_filter = st.multiselect("Filter by Location", sorted(df['Location'].unique()), [])
+        with col3: shortlist_filter = st.selectbox("Shortlisted Only?", ["All","YES","NO"])
 
         if role_filter: df = df[df['Job Title'].isin(role_filter)]
         if loc_filter: df = df[df['Location'].isin(loc_filter)]
