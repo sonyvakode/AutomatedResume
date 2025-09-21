@@ -1,8 +1,8 @@
 # ---------------------- app.py ----------------------
 import sys, os
 
-# Ensure 'src' folder is in Python path
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
+# Fix import path for src folder (since app.py is in frontend/)
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import streamlit as st
 import io, json, sqlite3
@@ -94,7 +94,7 @@ if menu == "Students: Upload Resume":
             # Display results
             st.subheader("Evaluation Results")
             st.metric("Relevance Score", scored['score'])
-            st.write("Verdict:", scored['verdict'])
+            st.markdown(f"**Verdict:** <span style='color:{'green' if scored['verdict']=='High' else 'orange' if scored['verdict']=='Medium' else 'red'};'>{scored['verdict']}</span>", unsafe_allow_html=True)
             st.write("Missing Skills/Projects/Certifications:")
             if scored['missing']:
                 for item in scored['missing']:
