@@ -1,0 +1,12 @@
+
+Role: Data Scientist - NLP
+Location: Hyderabad / Remote
+Must-have:
+- Python
+- NLP (transformers, tokenization)
+- Machine Learning (classification, regression)
+- SQL
+Good-to-have:
+- HuggingFace
+- Deployment (FastAPI, Docker)
+- Experience with resume parsing or ATS

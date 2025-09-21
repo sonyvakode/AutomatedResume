@@ -1,0 +1,13 @@
+
+fastapi
+"uvicorn[standard]"
+python-multipart
+streamlit
+python-docx
+pymupdf
+sentence-transformers
+scikit-learn
+fuzzywuzzy[speedup]
+python-Levenshtein
+pandas
+sqlalchemy

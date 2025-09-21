@@ -1,0 +1,15 @@
+
+Name: Priya Sharma
+Email: priya@example.com
+Summary:
+- Experienced ML engineer with 3 years building NLP pipelines.
+Skills:
+- Python, pandas, scikit-learn
+- Transformers, HuggingFace, tokenization
+- FastAPI, Docker
+Projects:
+- Resume parser: PDF/DOCX parser + skill extractor
+Certifications:
+- Coursera: NLP Specialization
+Education:
+- B.Tech Computer Science
