@@ -1,4 +1,4 @@
-# Streamlit and UI
+# Streamlit UI
 streamlit==1.26.0
 pandas==2.1.1
 numpy==1.26.2
@@ -8,21 +8,13 @@ python-docx==0.8.11
 pdfplumber==0.10.1
 PyMuPDF==1.23.1
 
-# Text Processing & NLP
+# NLP & Matching
 spacy==3.6.1
 fuzzywuzzy==0.18.0
 python-Levenshtein==0.21.2
 scikit-learn==1.3.2
 nltk==3.8.1
 
-# HTTP / API Calls
+# HTTP/API
 requests==2.31.0
 openai==1.7.0
-
-# Optional: Vector storage and embeddings
-chromadb==0.4.7
-faiss-cpu==1.7.4
-sentence-transformers==2.2.2
-
-# Others
-python-dotenv==1.0.0
