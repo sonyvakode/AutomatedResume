@@ -14,7 +14,26 @@ from src import parsers, matching, scorer  # db functions replaced with direct S
 os.makedirs('data', exist_ok=True)
 os.makedirs('data/resumes', exist_ok=True)
 
+# ------------------ Background Styling ------------------
 st.set_page_config(page_title="Resume Relevance Dashboard", layout="wide")
+page_bg_img = """
+<style>
+body {
+background-color: #f5f5f5;
+}
+section.main {
+background-color: #ffffff;
+border-radius: 15px;
+padding: 20px;
+box-shadow: 0px 0px 15px rgba(0,0,0,0.1);
+}
+h1, h2, h3 {
+color: #1f77b4;
+}
+</style>
+"""
+st.markdown(page_bg_img, unsafe_allow_html=True)
+
 st.title("📄 Automated Resume Relevance Check — Dashboard")
 
 menu = st.sidebar.selectbox(
@@ -56,6 +75,7 @@ if menu == "Students: Upload Resume":
     conn = sqlite3.connect('data/results.db')
     cur = conn.cursor()
     cur.execute("CREATE TABLE IF NOT EXISTS jds (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, content TEXT)")
+    cur.execute("CREATE TABLE IF NOT EXISTS evaluations (id INTEGER PRIMARY KEY AUTOINCREMENT, jd_id INTEGER, resume_name TEXT, score INTEGER, verdict TEXT, missing TEXT)")
     cur.execute("SELECT id, title FROM jds")
     jds = cur.fetchall()
     conn.close()
@@ -105,7 +125,6 @@ if menu == "Students: Upload Resume":
             # Save evaluation directly
             conn = sqlite3.connect('data/results.db')
             cur = conn.cursor()
-            cur.execute("CREATE TABLE IF NOT EXISTS evaluations (id INTEGER PRIMARY KEY AUTOINCREMENT, jd_id INTEGER, resume_name TEXT, score INTEGER, verdict TEXT, missing TEXT)")
             cur.execute("INSERT INTO evaluations (jd_id, resume_name, score, verdict, missing) VALUES (?, ?, ?, ?, ?)",
                         (jd_id, resume_file.name, scored['score'], scored['verdict'], json.dumps(scored['missing'])))
             conn.commit()
@@ -131,8 +150,32 @@ if menu == "Shortlist Dashboard":
     
     conn = sqlite3.connect('data/results.db')
     cur = conn.cursor()
-    cur.execute("CREATE TABLE IF NOT EXISTS evaluations (id INTEGER PRIMARY KEY AUTOINCREMENT, jd_id INTEGER, resume_name TEXT, score INTEGER, verdict TEXT, missing TEXT)")
-    cur.execute("SELECT e.id, j.title, e.resume_name, e.score, e.verdict, e.missing FROM evaluations e JOIN jds j ON e.jd_id=j.id")
+    
+    # Ensure tables exist
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS jds (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT,
+            content TEXT
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS evaluations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            jd_id INTEGER,
+            resume_name TEXT,
+            score INTEGER,
+            verdict TEXT,
+            missing TEXT
+        )
+    """)
+    
+    # Fetch evaluations
+    cur.execute("""
+        SELECT e.id, j.title, e.resume_name, e.score, e.verdict, e.missing 
+        FROM evaluations e 
+        JOIN jds j ON e.jd_id = j.id
+    """)
     evals = cur.fetchall()
     conn.close()
 
