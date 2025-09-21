@@ -1,14 +1,11 @@
-# Streamlit and UI
+# Streamlit UI
 streamlit==1.26.0
 pandas==2.1.1
 numpy==1.26.2
 
-# PDF/DOCX Parsing
+# DOCX Resume Parsing
 python-docx==0.8.11
-pdfplumber==0.10.1
-PyMuPDF==1.23.1
 
-# Text Processing & NLP
-spacy==3.6.1
+# Text Processing & Matching
 fuzzywuzzy==0.18.0
-python-Levenshte
+scikit-learn==1.3.2
