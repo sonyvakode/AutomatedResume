@@ -80,7 +80,10 @@ if menu=="Students: Upload Resume":
             st.subheader("Evaluation Results")
             st.metric("Relevance Score", scored['score'])
             st.write("Verdict:", scored['verdict'])
-            st.write("Missing Skills/Projects/Certifications:", scored['missing'])
+            st.write("Missing Skills/Projects/Certifications:")
+            if scored['missing']:
+                for item in scored['missing']:
+                    st.markdown(f"<span style='color:red; font-weight:bold'>● {item}</span>", unsafe_allow_html=True)
             if suggestions:
                 st.write("Suggestions for Improvement:")
                 for s in suggestions:
@@ -89,7 +92,7 @@ if menu=="Students: Upload Resume":
 # ---------------- Dashboard ----------------
 if menu=="Dashboard":
     st.header("Placement Team Dashboard")
-    st.info("Search and filter resumes by Job Title, Score, and Location.")
+    st.info("Search and filter resumes by Job Title, Company, Location, and Minimum Score.")
     evals = db.get_evaluations()
     if not evals:
         st.info("No evaluations yet.")
@@ -116,4 +119,15 @@ if menu=="Dashboard":
             (df['Score'] >= score_filter)
         ]
         
-        st.dataframe(df_filtered)
+        # Display Data with badges for missing skills
+        st.write(f"Total Evaluations: {len(df_filtered)}")
+        for idx, row in df_filtered.iterrows():
+            st.markdown(f"### Resume: {row['Resume']}")
+            st.markdown(f"**Job:** {row['Job Title']} | **Company:** {row['Company']} | **Location:** {row['Location']}")
+            st.markdown(f"**Score:** {row['Score']} | **Verdict:** {row['Verdict']}")
+            if row['Missing']:
+                missing = json.loads(row['Missing'])
+                st.markdown("**Missing Skills/Projects/Certifications:**")
+                for item in missing:
+                    st.markdown(f"<span style='color:red; font-weight:bold'>● {item}</span>", unsafe_allow_html=True)
+            st.markdown("---")
