@@ -1,7 +1,4 @@
-# ---------------------- app.py ----------------------
 import sys, os
-
-# Fix import path for src folder (since app.py is in frontend/)
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import streamlit as st
@@ -10,39 +7,30 @@ from pathlib import Path
 import pandas as pd
 from src import parsers, matching, scorer
 
-# Ensure data folders exist
+# Create directories if not exist
 os.makedirs('data/resumes', exist_ok=True)
 
-# ------------------ Page config & Background ------------------
-st.set_page_config(page_title="Resume Relevance Dashboard", layout="wide")
-page_bg_img = """
+# Page config & background styling
+st.set_page_config(page_title="Automated Resume Relevance Dashboard", layout="wide")
+page_bg = """
 <style>
-body {
-background-color: #f0f2f6;
-}
-section.main {
-background-color: #ffffff;
-border-radius: 15px;
-padding: 20px;
-box-shadow: 0px 0px 15px rgba(0,0,0,0.1);
-}
-h1, h2, h3 {
-color: #1f77b4;
-}
+body {background-color: #f0f2f6;}
+section.main {background-color: #ffffff; border-radius:15px; padding:20px; box-shadow: 0px 0px 15px rgba(0,0,0,0.1);}
+h1,h2,h3{color:#1f77b4;}
 </style>
 """
-st.markdown(page_bg_img, unsafe_allow_html=True)
+st.markdown(page_bg, unsafe_allow_html=True)
+st.title("📄 Automated Resume Relevance Dashboard")
 
-st.title("📄 Automated Resume Relevance Check — Dashboard")
-
+# Sidebar menu
 menu = st.sidebar.selectbox(
     "Menu", 
     ["Placement Team: Upload JD", "Students: Upload Resume", "Shortlist Dashboard", "Help / Samples"]
 )
 
-DB_PATH = "results.db"  # SQLite database in working directory
+DB_PATH = "results.db"
 
-# ------------------ Placement Team JD Upload ------------------
+# ------------------- Placement Team JD Upload -------------------
 if menu == "Placement Team: Upload JD":
     st.header("Upload Job Description (Placement Team)")
     with st.form("jd_form"):
@@ -56,7 +44,7 @@ if menu == "Placement Team: Upload JD":
             if jd_file is not None:
                 jd_txt = jd_file.getvalue().decode('utf-8', errors='ignore')
             if not jd_txt.strip() or not title.strip() or not company.strip() or not location.strip():
-                st.error("Please provide all details and JD content/file.")
+                st.error("Provide all details and JD content/file.")
             else:
                 jd_full_title = f"{title} | {company} | {location}"
                 conn = sqlite3.connect(DB_PATH)
@@ -74,73 +62,59 @@ if menu == "Placement Team: Upload JD":
                 conn.close()
                 st.success(f"JD uploaded successfully with ID: {jd_id}")
 
-# ------------------ Student Resume Upload ------------------
+# ------------------- Student Resume Upload & Parsing -------------------
 if menu == "Students: Upload Resume":
     st.header("Resume Upload (Students)")
+    
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS jds (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT,
-            content TEXT
-        )
-    """)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS evaluations (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            jd_id INTEGER,
-            resume_name TEXT,
-            score INTEGER,
-            verdict TEXT,
-            missing TEXT
-        )
-    """)
-    cur.execute("SELECT id, title FROM jds")
+    cur.execute("CREATE TABLE IF NOT EXISTS jds (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, content TEXT)")
+    cur.execute("CREATE TABLE IF NOT EXISTS evaluations (id INTEGER PRIMARY KEY AUTOINCREMENT, jd_id INTEGER, resume_name TEXT, score INTEGER, verdict TEXT, missing TEXT)")
+    cur.execute("SELECT id, title, content FROM jds")
     jds = cur.fetchall()
     conn.close()
 
-    jd_dict = {f"{row[1]} (ID:{row[0]})": row[0] for row in jds}
-    if not jd_dict:
+    if not jds:
         st.warning("No job requirements available. Please wait for Placement Team to upload JD.")
     else:
+        jd_dict = {f"{row[1]} (ID:{row[0]})": (row[0], row[2]) for row in jds}
         jd_sel = st.selectbox("Select Job Requirement", list(jd_dict.keys()))
         resume_file = st.file_uploader("Upload Resume (PDF/DOCX/TXT)", type=['pdf','docx','txt'])
-        if st.button("Evaluate") and resume_file:
+
+        if st.button("Parse & Evaluate") and resume_file:
             resume_path = os.path.join("data/resumes", resume_file.name)
             with open(resume_path,'wb') as f:
                 f.write(resume_file.getvalue())
             
-            # Extract text
+            # Resume Parsing
             resume_text = parsers.extract_text(resume_path)
             resume_text = parsers.normalize_text(resume_text)
 
-            # Get JD content
-            jd_id = jd_dict[jd_sel]
-            conn = sqlite3.connect(DB_PATH)
-            cur = conn.cursor()
-            cur.execute("SELECT content FROM jds WHERE id=?",(jd_id,))
-            jd_content = cur.fetchone()[0]
-            conn.close()
-
-            # Parse JD
+            # JD Parsing
+            jd_id, jd_content = jd_dict[jd_sel]
             jd_parsed = parsers.parse_jd(jd_content)
 
-            # Step 1: Hard Match
+            st.subheader("Parsed JD Details")
+            st.write(f"**Role Title:** {jd_parsed.get('role_title','')}")
+            st.write(f"**Must-have Skills:** {', '.join(jd_parsed.get('must_have_skills',[]))}")
+            st.write(f"**Good-to-have Skills:** {', '.join(jd_parsed.get('good_to_have_skills',[]))}")
+            st.write(f"**Qualifications:** {', '.join(jd_parsed.get('qualifications',[]))}")
+
+            # Hard Match
             hard = matching.hard_match(resume_text, jd_parsed)
 
-            # Step 2: Semantic Match
+            # Semantic Match
             sem = matching.semantic_similarity(resume_text, jd_content)
 
-            # Step 3: Scoring & Verdict
+            # Scoring & Verdict
             scored = scorer.compute_final_score(hard, sem)
 
             # Suggestions
             suggestions = []
             if scored['verdict'] != 'High':
                 if scored['missing']:
-                    suggestions.append(f"Consider acquiring or highlighting skills: {', '.join(scored['missing'])}")
-                suggestions.append("Enhance resume with projects, certifications, and quantified achievements")
+                    suggestions.append(f"Missing skills/projects: {', '.join(scored['missing'])}")
+                suggestions.append("Add relevant certifications or projects to improve relevance.")
 
             # Save evaluation
             conn = sqlite3.connect(DB_PATH)
@@ -150,12 +124,12 @@ if menu == "Students: Upload Resume":
             conn.commit()
             conn.close()
 
-            # Display results
+            # Display Results
             st.subheader("Evaluation Results")
             st.metric("Relevance Score", scored['score'])
             st.markdown(f"**Verdict:** <span style='color:{'green' if scored['verdict']=='High' else 'orange' if scored['verdict']=='Medium' else 'red'};'>{scored['verdict']}</span>", unsafe_allow_html=True)
-            st.write("Missing Skills/Projects/Certifications:")
             if scored['missing']:
+                st.write("Missing Skills/Projects/Certifications:")
                 for item in scored['missing']:
                     st.markdown(f"<span style='color:red; font-weight:bold'>● {item}</span>", unsafe_allow_html=True)
             if suggestions:
@@ -163,33 +137,17 @@ if menu == "Students: Upload Resume":
                 for s in suggestions:
                     st.write(f"- {s}")
 
-# ------------------ Shortlist Dashboard ------------------
+# ------------------- Shortlist Dashboard -------------------
 if menu == "Shortlist Dashboard":
     st.header("Shortlist Dashboard")
     st.info("Filter resumes by Job Title, Company, Location, and Minimum Score")
     
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
-    # Ensure tables
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS jds (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT,
-            content TEXT
-        )
-    """)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS evaluations (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            jd_id INTEGER,
-            resume_name TEXT,
-            score INTEGER,
-            verdict TEXT,
-            missing TEXT
-        )
-    """)
+    # Ensure tables exist
+    cur.execute("CREATE TABLE IF NOT EXISTS jds (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, content TEXT)")
+    cur.execute("CREATE TABLE IF NOT EXISTS evaluations (id INTEGER PRIMARY KEY AUTOINCREMENT, jd_id INTEGER, resume_name TEXT, score INTEGER, verdict TEXT, missing TEXT)")
     
-    # Safe fetch evaluations
     try:
         cur.execute("""
             SELECT e.id, j.title, e.resume_name, e.score, e.verdict, e.missing 
@@ -206,9 +164,7 @@ if menu == "Shortlist Dashboard":
     else:
         df = pd.DataFrame(evals, columns=["ID","JD Title","Resume","Score","Verdict","Missing"])
         df[['Job Title','Company','Location']] = df['JD Title'].str.split('|', expand=True)
-        df['Job Title'] = df['Job Title'].str.strip()
-        df['Company'] = df['Company'].str.strip()
-        df['Location'] = df['Location'].str.strip()
+        df = df.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
         
         # Filters
         st.sidebar.subheader("Filters")
@@ -238,10 +194,10 @@ if menu == "Shortlist Dashboard":
                     st.markdown(f"<span style='color:red; font-weight:bold'>● {item}</span>", unsafe_allow_html=True)
             st.markdown("---")
 
-# ------------------ Help / Samples ------------------
+# ------------------- Help / Samples -------------------
 if menu == "Help / Samples":
     st.header("Help & Sample Data")
-    st.write("Sample data included in `data/sample/`. Upload JD, then student can upload resumes to evaluate.")
+    st.write("Sample data included in `data/sample/`. Upload JD first, then student resumes to evaluate.")
     sample_jd_path = Path('data/sample/job_description.txt')
     sample_resume_path = Path('data/sample/sample_resume.txt')
     if sample_jd_path.exists():
