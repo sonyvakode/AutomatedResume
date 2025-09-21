@@ -8,10 +8,11 @@ import streamlit as st
 import io, json, sqlite3
 from pathlib import Path
 import pandas as pd
-from src import parsers, matching, scorer, db
+from src import parsers, matching, scorer  # db functions replaced with direct SQLite
 
-# Initialize DB
-db.init_db()
+# Ensure data folder exists
+os.makedirs('data', exist_ok=True)
+os.makedirs('data/resumes', exist_ok=True)
 
 st.set_page_config(page_title="Resume Relevance Dashboard", layout="wide")
 st.title("📄 Automated Resume Relevance Check — Dashboard")
@@ -38,13 +39,27 @@ if menu == "Placement Team: Upload JD":
                 st.error("Please provide all details and JD content/file.")
             else:
                 jd_full_title = f"{title} | {company} | {location}"
-                jd_id = db.save_jd(jd_full_title, jd_txt)
+                # Direct SQLite insertion
+                conn = sqlite3.connect('data/results.db')
+                cur = conn.cursor()
+                cur.execute("CREATE TABLE IF NOT EXISTS jds (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, content TEXT)")
+                cur.execute("INSERT INTO jds (title, content) VALUES (?, ?)", (jd_full_title, jd_txt))
+                conn.commit()
+                jd_id = cur.lastrowid
+                conn.close()
                 st.success(f"JD uploaded successfully with ID: {jd_id}")
 
 # ------------------ Student Resume Upload ------------------
 if menu == "Students: Upload Resume":
     st.header("Resume Upload (Students)")
-    jds = db.get_jds()
+    # Fetch JDs directly
+    conn = sqlite3.connect('data/results.db')
+    cur = conn.cursor()
+    cur.execute("CREATE TABLE IF NOT EXISTS jds (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, content TEXT)")
+    cur.execute("SELECT id, title FROM jds")
+    jds = cur.fetchall()
+    conn.close()
+    
     jd_dict = {f"{row[1]} (ID:{row[0]})": row[0] for row in jds}
     if not jd_dict:
         st.warning("No job requirements available. Please wait for Placement Team to upload JD.")
@@ -52,7 +67,6 @@ if menu == "Students: Upload Resume":
         jd_sel = st.selectbox("Select Job Requirement", list(jd_dict.keys()))
         resume_file = st.file_uploader("Upload Resume (PDF/DOCX/TXT)", type=['pdf','docx','txt'])
         if st.button("Evaluate") and resume_file:
-            os.makedirs("data/resumes", exist_ok=True)
             resume_path = os.path.join("data/resumes", resume_file.name)
             with open(resume_path,'wb') as f:
                 f.write(resume_file.getvalue())
@@ -88,8 +102,14 @@ if menu == "Students: Upload Resume":
                     suggestions.append(f"Consider acquiring or highlighting skills: {', '.join(scored['missing'])}")
                 suggestions.append("Enhance resume with projects, certifications, and quantified achievements")
 
-            # Save evaluation
-            db.save_evaluation(jd_id, resume_file.name, scored['score'], scored['verdict'], scored['missing'])
+            # Save evaluation directly
+            conn = sqlite3.connect('data/results.db')
+            cur = conn.cursor()
+            cur.execute("CREATE TABLE IF NOT EXISTS evaluations (id INTEGER PRIMARY KEY AUTOINCREMENT, jd_id INTEGER, resume_name TEXT, score INTEGER, verdict TEXT, missing TEXT)")
+            cur.execute("INSERT INTO evaluations (jd_id, resume_name, score, verdict, missing) VALUES (?, ?, ?, ?, ?)",
+                        (jd_id, resume_file.name, scored['score'], scored['verdict'], json.dumps(scored['missing'])))
+            conn.commit()
+            conn.close()
 
             # Display results
             st.subheader("Evaluation Results")
@@ -108,12 +128,18 @@ if menu == "Students: Upload Resume":
 if menu == "Shortlist Dashboard":
     st.header("Shortlist Dashboard")
     st.info("Filter resumes by Job Title, Company, Location, and Minimum Score")
-    evals = db.get_evaluations()
+    
+    conn = sqlite3.connect('data/results.db')
+    cur = conn.cursor()
+    cur.execute("CREATE TABLE IF NOT EXISTS evaluations (id INTEGER PRIMARY KEY AUTOINCREMENT, jd_id INTEGER, resume_name TEXT, score INTEGER, verdict TEXT, missing TEXT)")
+    cur.execute("SELECT e.id, j.title, e.resume_name, e.score, e.verdict, e.missing FROM evaluations e JOIN jds j ON e.jd_id=j.id")
+    evals = cur.fetchall()
+    conn.close()
+
     if not evals:
         st.info("No evaluations yet.")
     else:
         df = pd.DataFrame(evals, columns=["ID","JD Title","Resume","Score","Verdict","Missing"])
-        # Split JD Title into components
         df[['Job Title','Company','Location']] = df['JD Title'].str.split('|', expand=True)
         df['Job Title'] = df['Job Title'].str.strip()
         df['Company'] = df['Company'].str.strip()
