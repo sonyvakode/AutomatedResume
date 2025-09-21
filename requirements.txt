@@ -1,4 +1,4 @@
-# Streamlit for web app
+# Web app
 streamlit==1.27.0
 
 # Data handling
@@ -19,5 +19,8 @@ sentence-transformers==2.2.2
 fuzzywuzzy==0.18.0
 python-Levenshtein==0.21.0
 
-# Database
+# Database / ORM (SQLite)
 SQLAlchemy==2.0.21
+
+# Optional: for semantic similarity (if using embeddings)
+torch==2.1.0
