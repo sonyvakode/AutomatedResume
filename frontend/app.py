@@ -1,69 +1,119 @@
-
 import streamlit as st
-import requests, os, io, pandas as pd, json
-from pathlib import Path
+import os, json, sqlite3
+from src import parsers, matching, scorer, db
 
-API_BASE = st.secrets.get('API_BASE', 'http://localhost:8000')
+db.init_db()
+st.set_page_config(page_title="Resume Relevance Checker", layout="wide")
+st.title("📄 Automated Resume Relevance Checker")
 
-st.set_page_config(page_title="Resume Relevance Dashboard", layout="wide")
+menu = st.sidebar.selectbox("Menu", ["Placement Team: Upload JD", "Students: Upload Resume", "Dashboard"])
 
-def local_text(path):
-    try:
-        return open(path,'r',encoding='utf-8').read()
-    except:
-        return ''
-
-st.title("📄 Automated Resume Relevance Check — Dashboard")
-menu = st.sidebar.selectbox("Menu", ["Upload Job Description", "Evaluate Resume", "Shortlist Dashboard", "Help / Samples"])
-
-if menu == "Upload Job Description":
-    st.header("Upload Job Description")
+# ---------------- Placement Team: JD Upload ----------------
+if menu=="Placement Team: Upload JD":
+    st.header("Job Requirement Upload - Placement Team")
     with st.form("jd_form"):
-        title = st.text_input("Job title / Role", value="Data Scientist - NLP")
-        jd_txt = st.text_area("Paste JD text (or upload below)", height=200)
-        jd_file = st.file_uploader("Or upload a .txt/.md JD file", type=['txt','md'])
-        submitted = st.form_submit_button("Upload JD")
+        title = st.text_input("Job Title")
+        company = st.text_input("Company Name")
+        location = st.text_input("Location")
+        jd_file = st.file_uploader("Upload Job Description (.txt)", type=['txt'])
+        submitted = st.form_submit_button("Save JD")
         if submitted:
-            if jd_file is not None:
-                jd_txt = jd_file.getvalue().decode('utf-8', errors='ignore')
-            if not jd_txt.strip():
-                st.error("Provide JD text or file.")
+            if jd_file is None or not title.strip() or not company.strip() or not location.strip():
+                st.error("Please fill all fields and upload JD file")
             else:
-                files = {'jd_file': ('jd.txt', jd_txt)}
-                data = {'title': title}
-                resp = requests.post(f"{API_BASE}/upload_jd/", data=data, files=files)
-                st.success("Uploaded JD: " + str(resp.json()))
+                content = jd_file.getvalue().decode('utf-8', errors='ignore')
+                jd_id = db.save_jd(f"{title} | {company} | {location}", content)
+                st.success(f"JD saved with ID: {jd_id}")
 
-if menu == "Evaluate Resume":
-    st.header("Evaluate Resume")
-    jd_id = st.number_input("JD id (from upload response)", min_value=1, value=1)
-    uploaded = st.file_uploader("Upload resume (PDF/DOCX/TXT)", type=['pdf','docx','txt'])
-    if st.button("Evaluate"):
-        if uploaded is None:
-            st.error("Upload a resume first.")
-        else:
-            files = {'resume_file': (uploaded.name, uploaded.getvalue())}
-            data = {'jd_id': str(jd_id)}
-            with st.spinner("Evaluating..."):
-                resp = requests.post(f"{API_BASE}/evaluate/", data=data, files=files)
-            res = resp.json()
-            st.subheader("Result")
-            st.metric("Relevance Score", res.get('score', 0))
-            st.write("Verdict:", res.get('verdict'))
-            st.write("Missing items:", res.get('missing', []))
-            st.write("Raw details:")
-            st.json(res)
+# ---------------- Students: Resume Upload ----------------
+if menu=="Students: Upload Resume":
+    st.header("Resume Upload - Students")
+    jds = db.get_jds()
+    jd_dict = {f"{row[1]} (ID:{row[0]})": row[0] for row in jds}
+    if not jd_dict:
+        st.warning("No Job Requirements found. Please wait for placement team to upload JD.")
+    else:
+        jd_sel = st.selectbox("Select Job Requirement", list(jd_dict.keys()))
+        resume_file = st.file_uploader("Upload Resume (PDF/DOCX/TXT)", type=['pdf','docx','txt'])
+        if st.button("Evaluate") and resume_file:
+            # Save resume temporarily
+            os.makedirs("data/resumes", exist_ok=True)
+            resume_path = os.path.join("data/resumes", resume_file.name)
+            with open(resume_path,'wb') as f:
+                f.write(resume_file.getvalue())
+            
+            # Extract and normalize resume text
+            resume_text = parsers.extract_text(resume_path)
+            resume_text = parsers.normalize_text(resume_text)
+            
+            # Get JD content
+            jd_id = jd_dict[jd_sel]
+            conn = sqlite3.connect('data/results.db')
+            cur = conn.cursor()
+            cur.execute("SELECT content FROM jds WHERE id=?",(jd_id,))
+            jd_content = cur.fetchone()[0]
+            conn.close()
+            
+            # Parse JD
+            jd_parsed = parsers.parse_jd(jd_content)
+            
+            # Step 1: Hard Match
+            hard = matching.hard_match(resume_text, jd_parsed)
+            
+            # Step 2: Semantic Match
+            sem = matching.semantic_similarity(resume_text, jd_content)
+            
+            # Step 3: Scoring & Verdict
+            scored = scorer.compute_final_score(hard, sem)
+            
+            # Generate suggestions
+            suggestions = []
+            if scored['verdict'] != 'High':
+                if scored['missing']:
+                    suggestions.append(f"Consider acquiring or highlighting skills: {', '.join(scored['missing'])}")
+                suggestions.append("Enhance resume with projects, certifications, and quantified achievements")
+            
+            # Save evaluation
+            db.save_evaluation(jd_id, resume_file.name, scored['score'], scored['verdict'], scored['missing'])
+            
+            # Display Results
+            st.subheader("Evaluation Results")
+            st.metric("Relevance Score", scored['score'])
+            st.write("Verdict:", scored['verdict'])
+            st.write("Missing Skills/Projects/Certifications:", scored['missing'])
+            if suggestions:
+                st.write("Suggestions for Improvement:")
+                for s in suggestions:
+                    st.write(f"- {s}")
 
-if menu == "Shortlist Dashboard":
-    st.header("Shortlist Dashboard")
-    st.info("This demo stores results in a local SQLite DB. Use backend/src/db.py to explore.")
-    # For demo, show sample data from data/sample
-    sample_jd = local_text('data/sample/job_description.txt')
-    st.subheader("Sample JD")
-    st.code(sample_jd)
-    st.subheader("Sample Resume")
-    st.code(local_text('data/sample/sample_resume.txt'))
-
-if menu == "Help / Samples":
-    st.header("Help & Samples")
-    st.write("Sample data included in `data/sample/`. README has run steps.")
+# ---------------- Dashboard ----------------
+if menu=="Dashboard":
+    st.header("Placement Team Dashboard")
+    st.info("Search and filter resumes by Job Title, Score, and Location.")
+    evals = db.get_evaluations()
+    if not evals:
+        st.info("No evaluations yet.")
+    else:
+        import pandas as pd
+        df = pd.DataFrame(evals, columns=["ID","JD Title","Resume","Score","Verdict","Missing"])
+        # Split JD Title into components for filtering
+        df[['Job Title','Company','Location']] = df['JD Title'].str.split('|', expand=True)
+        df['Job Title'] = df['Job Title'].str.strip()
+        df['Company'] = df['Company'].str.strip()
+        df['Location'] = df['Location'].str.strip()
+        
+        # Filters
+        st.sidebar.subheader("Filters")
+        job_filter = st.sidebar.multiselect("Job Title", options=df['Job Title'].unique(), default=df['Job Title'].unique())
+        company_filter = st.sidebar.multiselect("Company", options=df['Company'].unique(), default=df['Company'].unique())
+        location_filter = st.sidebar.multiselect("Location", options=df['Location'].unique(), default=df['Location'].unique())
+        score_filter = st.sidebar.slider("Minimum Score", 0, 100, 0)
+        
+        df_filtered = df[
+            (df['Job Title'].isin(job_filter)) &
+            (df['Company'].isin(company_filter)) &
+            (df['Location'].isin(location_filter)) &
+            (df['Score'] >= score_filter)
+        ]
+        
+        st.dataframe(df_filtered)
