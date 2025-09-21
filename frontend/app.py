@@ -8,18 +8,17 @@ import streamlit as st
 import io, json, sqlite3
 from pathlib import Path
 import pandas as pd
-from src import parsers, matching, scorer  # db functions replaced with direct SQLite
+from src import parsers, matching, scorer
 
-# Ensure data folder exists
-os.makedirs('data', exist_ok=True)
+# Ensure data folders exist
 os.makedirs('data/resumes', exist_ok=True)
 
-# ------------------ Background Styling ------------------
+# ------------------ Page config & Background ------------------
 st.set_page_config(page_title="Resume Relevance Dashboard", layout="wide")
 page_bg_img = """
 <style>
 body {
-background-color: #f5f5f5;
+background-color: #f0f2f6;
 }
 section.main {
 background-color: #ffffff;
@@ -41,7 +40,9 @@ menu = st.sidebar.selectbox(
     ["Placement Team: Upload JD", "Students: Upload Resume", "Shortlist Dashboard", "Help / Samples"]
 )
 
-# ------------------ JD Upload ------------------
+DB_PATH = "results.db"  # SQLite database in working directory
+
+# ------------------ Placement Team JD Upload ------------------
 if menu == "Placement Team: Upload JD":
     st.header("Upload Job Description (Placement Team)")
     with st.form("jd_form"):
@@ -58,10 +59,15 @@ if menu == "Placement Team: Upload JD":
                 st.error("Please provide all details and JD content/file.")
             else:
                 jd_full_title = f"{title} | {company} | {location}"
-                # Direct SQLite insertion
-                conn = sqlite3.connect('data/results.db')
+                conn = sqlite3.connect(DB_PATH)
                 cur = conn.cursor()
-                cur.execute("CREATE TABLE IF NOT EXISTS jds (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, content TEXT)")
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS jds (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        title TEXT,
+                        content TEXT
+                    )
+                """)
                 cur.execute("INSERT INTO jds (title, content) VALUES (?, ?)", (jd_full_title, jd_txt))
                 conn.commit()
                 jd_id = cur.lastrowid
@@ -71,15 +77,29 @@ if menu == "Placement Team: Upload JD":
 # ------------------ Student Resume Upload ------------------
 if menu == "Students: Upload Resume":
     st.header("Resume Upload (Students)")
-    # Fetch JDs directly
-    conn = sqlite3.connect('data/results.db')
+    conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
-    cur.execute("CREATE TABLE IF NOT EXISTS jds (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, content TEXT)")
-    cur.execute("CREATE TABLE IF NOT EXISTS evaluations (id INTEGER PRIMARY KEY AUTOINCREMENT, jd_id INTEGER, resume_name TEXT, score INTEGER, verdict TEXT, missing TEXT)")
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS jds (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT,
+            content TEXT
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS evaluations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            jd_id INTEGER,
+            resume_name TEXT,
+            score INTEGER,
+            verdict TEXT,
+            missing TEXT
+        )
+    """)
     cur.execute("SELECT id, title FROM jds")
     jds = cur.fetchall()
     conn.close()
-    
+
     jd_dict = {f"{row[1]} (ID:{row[0]})": row[0] for row in jds}
     if not jd_dict:
         st.warning("No job requirements available. Please wait for Placement Team to upload JD.")
@@ -97,7 +117,7 @@ if menu == "Students: Upload Resume":
 
             # Get JD content
             jd_id = jd_dict[jd_sel]
-            conn = sqlite3.connect('data/results.db')
+            conn = sqlite3.connect(DB_PATH)
             cur = conn.cursor()
             cur.execute("SELECT content FROM jds WHERE id=?",(jd_id,))
             jd_content = cur.fetchone()[0]
@@ -122,8 +142,8 @@ if menu == "Students: Upload Resume":
                     suggestions.append(f"Consider acquiring or highlighting skills: {', '.join(scored['missing'])}")
                 suggestions.append("Enhance resume with projects, certifications, and quantified achievements")
 
-            # Save evaluation directly
-            conn = sqlite3.connect('data/results.db')
+            # Save evaluation
+            conn = sqlite3.connect(DB_PATH)
             cur = conn.cursor()
             cur.execute("INSERT INTO evaluations (jd_id, resume_name, score, verdict, missing) VALUES (?, ?, ?, ?, ?)",
                         (jd_id, resume_file.name, scored['score'], scored['verdict'], json.dumps(scored['missing'])))
@@ -148,10 +168,9 @@ if menu == "Shortlist Dashboard":
     st.header("Shortlist Dashboard")
     st.info("Filter resumes by Job Title, Company, Location, and Minimum Score")
     
-    conn = sqlite3.connect('data/results.db')
+    conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
-    
-    # Ensure tables exist
+    # Ensure tables
     cur.execute("""
         CREATE TABLE IF NOT EXISTS jds (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -170,13 +189,16 @@ if menu == "Shortlist Dashboard":
         )
     """)
     
-    # Fetch evaluations
-    cur.execute("""
-        SELECT e.id, j.title, e.resume_name, e.score, e.verdict, e.missing 
-        FROM evaluations e 
-        JOIN jds j ON e.jd_id = j.id
-    """)
-    evals = cur.fetchall()
+    # Safe fetch evaluations
+    try:
+        cur.execute("""
+            SELECT e.id, j.title, e.resume_name, e.score, e.verdict, e.missing 
+            FROM evaluations e 
+            JOIN jds j ON e.jd_id = j.id
+        """)
+        evals = cur.fetchall()
+    except sqlite3.OperationalError:
+        evals = []
     conn.close()
 
     if not evals:
