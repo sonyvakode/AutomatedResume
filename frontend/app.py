@@ -15,14 +15,12 @@ os.makedirs('data/sample', exist_ok=True)
 
 # -------------------- Page Config --------------------
 st.set_page_config(page_title="Automated Resume Relevance Dashboard", layout="wide")
+st.title("📄 Automated Resume Relevance Dashboard")
 
 # -------------------- CSS Styling --------------------
 st.markdown("""
 <style>
-/* Headings */
 h1,h2,h3 {color:#1f2937; font-family: 'Segoe UI', sans-serif;}
-
-/* Buttons */
 .stButton>button {
     background-color: #1f77b4; 
     color: white;
@@ -34,49 +32,15 @@ h1,h2,h3 {color:#1f2937; font-family: 'Segoe UI', sans-serif;}
     transform: scale(1.02);
     transition: 0.2s;
 }
-
-/* File uploader */
-.stFileUploader>div {
-    border: 2px dashed #1f77b4; 
-    border-radius: 10px; 
-    padding: 10px;
-}
-
-/* Sidebar */
-[data-testid="stSidebar"] > div:first-child {
-    background-color: #1f77b4;
-    color: white;
-}
-[data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3, [data-testid="stSidebar"] label {
-    color: white;
-}
-[data-testid="stSidebar"] .stSelectbox, 
-[data-testid="stSidebar"] .stMultiselect, 
-[data-testid="stSidebar"] .stSlider {
-    background-color: rgba(255,255,255,0.15);
-    color: white;
-}
-
-/* DataFrame Table */
-.stDataFrame table {
-    border: 1px solid #ddd;
-    border-radius: 6px;
-}
-.stDataFrame th {
-    background-color: #2c3e50 !important;
-    color: white !important;
-    font-weight: 600 !important;
-}
-.stDataFrame tbody tr:nth-child(even) {
-    background-color: #f9f9f9 !important;
-}
-.stDataFrame tbody tr:hover {
-    background-color: #e6f7ff !important;
-}
+.stFileUploader>div {border: 2px dashed #1f77b4; border-radius: 10px; padding: 10px;}
+[data-testid="stSidebar"] > div:first-child {background-color: #1f77b4; color: white;}
+[data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3, [data-testid="stSidebar"] label {color: white;}
+.stDataFrame table {border: 1px solid #ddd; border-radius: 6px;}
+.stDataFrame th {background-color: #2c3e50 !important; color: white !important; font-weight: 600 !important;}
+.stDataFrame tbody tr:nth-child(even) {background-color: #f9f9f9 !important;}
+.stDataFrame tbody tr:hover {background-color: #e6f7ff !important;}
 </style>
 """, unsafe_allow_html=True)
-
-st.title("📄 Automated Resume Relevance Dashboard")
 
 # -------------------- Sidebar Menu --------------------
 menu = st.sidebar.selectbox(
@@ -98,13 +62,10 @@ def parse_jd(jd_text):
     lines = jd_text.splitlines()
     title = lines[0] if lines else "Role"
     must_have_skills = [line.strip() for line in lines[1:] if line.strip()]
-    return {"role_title": title, "must_have_skills": must_have_skills, "good_to_have_skills": [], "qualifications": []}
+    return {"role_title": title, "must_have_skills": must_have_skills}
 
 def hard_match(resume_text, jd_parsed):
-    missing = []
-    for skill in jd_parsed.get('must_have_skills', []):
-        if skill.lower() not in resume_text:
-            missing.append(skill)
+    missing = [skill for skill in jd_parsed.get('must_have_skills', []) if skill.lower() not in resume_text]
     score = max(0, 100 - len(missing)*10)
     return score, missing
 
@@ -164,14 +125,12 @@ if menu == "Students: Upload Resume":
     conn.close()
 
     resume_file = st.file_uploader("Upload Resume (DOCX/TXT)", type=['docx','txt'])
-    jd_available = len(jds) > 0
-    jd_dict = {f"{row[1]} (ID:{row[0]})": (row[0], row[2]) for row in jds} if jd_available else {}
+    jd_dict = {f"{row[1]} (ID:{row[0]})": (row[0], row[2]) for row in jds} if jds else {}
+    jd_available = bool(jd_dict)
 
-    if jd_available:
-        jd_sel = st.selectbox("Select Job Requirement", list(jd_dict.keys()))
-    else:
+    jd_sel = st.selectbox("Select Job Requirement", list(jd_dict.keys())) if jd_available else None
+    if not jd_available:
         st.info("No JD posted yet. You can still upload your resume to get general suggestions.")
-        jd_sel = None
 
     if st.button("Parse & Evaluate") and resume_file:
         with st.spinner("Evaluating resume..."):
@@ -179,16 +138,10 @@ if menu == "Students: Upload Resume":
             with open(resume_path,'wb') as f:
                 f.write(resume_file.getvalue())
 
-            if resume_file.name.endswith(".docx"):
-                resume_text = extract_docx_text(resume_path)
-            else:
-                resume_text = open(resume_path,'r',encoding='utf-8').read()
+            resume_text = extract_docx_text(resume_path) if resume_file.name.endswith(".docx") else open(resume_path,'r',encoding='utf-8').read()
             resume_text = normalize_text(resume_text)
 
-            missing = []
-            final_score = 0
-            verdict = "No JD"
-            suggestions = []
+            missing, final_score, verdict, suggestions = [], 0, "No JD", []
 
             if jd_available:
                 jd_id, jd_content = jd_dict[jd_sel]
@@ -203,9 +156,8 @@ if menu == "Students: Upload Resume":
                 final_score = scored['score']
                 verdict = scored['verdict']
 
-                if scored['verdict'] != 'High':
-                    if scored['missing']:
-                        suggestions.append(f"Missing skills/projects: {', '.join(scored['missing'])}")
+                if scored['verdict'] != 'High' and scored['missing']:
+                    suggestions.append(f"Missing skills/projects: {', '.join(scored['missing'])}")
                     suggestions.append("Add relevant certifications or projects to improve relevance.")
 
                 conn = sqlite3.connect(DB_PATH)
@@ -215,7 +167,7 @@ if menu == "Students: Upload Resume":
                 conn.commit()
                 conn.close()
             else:
-                suggestions.append("JD not posted yet. Focus on including key skills, projects, and certifications relevant to your field.")
+                suggestions.append("JD not posted yet. Include key skills, projects, and certifications relevant to your field.")
 
             st.subheader("Evaluation Results")
             if jd_available:
@@ -226,12 +178,10 @@ if menu == "Students: Upload Resume":
 
             if missing:
                 st.write("Missing Skills/Projects/Certifications:")
-                for item in missing:
-                    st.write(f"● {item}")
+                for item in missing: st.write(f"● {item}")
             if suggestions:
                 st.write("Suggestions for Improvement:")
-                for s in suggestions:
-                    st.write(f"- {s}")
+                for s in suggestions: st.write(f"- {s}")
 
 # -------------------- Shortlist Dashboard --------------------
 if menu == "Shortlist Dashboard":
@@ -257,40 +207,28 @@ if menu == "Shortlist Dashboard":
         df = pd.DataFrame(evals, columns=["ID","JD Title","Resume","Score","Verdict","Missing"])
         df[['Job Title','Company','Location']] = df['JD Title'].str.split('|', expand=True)
         df = df.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
-
-        # Add Shortlisted column
         df['Shortlisted'] = df['Verdict'].apply(lambda v: "YES" if v in ["High", "Medium"] else "NO")
 
-        # ===== Filters =====
+        # Filters
         col1, col2, col3 = st.columns(3)
-        with col1:
-            role_filter = st.multiselect("Filter by Role", options=sorted(df['Job Title'].unique().tolist()), default=[])
-        with col2:
-            loc_filter = st.multiselect("Filter by Location", options=sorted(df['Location'].unique().tolist()), default=[])
-        with col3:
-            shortlist_filter = st.selectbox("Shortlisted Only?", options=["All", "YES", "NO"])
+        with col1: role_filter = st.multiselect("Filter by Role", options=sorted(df['Job Title'].unique().tolist()), default=[])
+        with col2: loc_filter = st.multiselect("Filter by Location", options=sorted(df['Location'].unique().tolist()), default=[])
+        with col3: shortlist_filter = st.selectbox("Shortlisted Only?", options=["All", "YES", "NO"])
 
-        # Apply filters
-        if role_filter:
-            df = df[df['Job Title'].isin(role_filter)]
-        if loc_filter:
-            df = df[df['Location'].isin(loc_filter)]
-        if shortlist_filter != "All":
-            df = df[df['Shortlisted'] == shortlist_filter]
+        if role_filter: df = df[df['Job Title'].isin(role_filter)]
+        if loc_filter: df = df[df['Location'].isin(loc_filter)]
+        if shortlist_filter != "All": df = df[df['Shortlisted']==shortlist_filter]
 
-        st.dataframe(
-            df[['Resume','Job Title','Company','Location','Score','Verdict','Shortlisted','Missing']],
-            use_container_width=True
-        )
+        st.dataframe(df[['Resume','Job Title','Company','Location','Score','Verdict','Shortlisted','Missing']], use_container_width=True)
 
 # -------------------- Help / Samples --------------------
 if menu == "Help / Samples":
     st.header("Help & Sample Data")
     st.write("Upload JD first, then student resumes to evaluate.")
+
     sample_jd_path = Path('data/sample/job_description.txt')
     sample_resume_path = Path('data/sample/sample_resume.txt')
-    
-    # Create sample files if missing
+
     if not sample_jd_path.exists():
         sample_jd_path.write_text("Software Engineer\nPython\nSQL\nMachine Learning\nCommunication Skills")
     if not sample_resume_path.exists():
