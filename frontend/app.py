@@ -15,12 +15,12 @@ os.makedirs('data/resumes', exist_ok=True)
 # -------------------- Page Config --------------------
 st.set_page_config(page_title="Automated Resume Relevance Dashboard", layout="wide")
 
-# -------------------- Custom CSS Styling --------------------
+# -------------------- CSS Styling --------------------
 st.markdown("""
 <style>
-/* Main section */
+/* Main section background */
 section.main {
-    background-color: #f8f9fa;
+    background-color: #ffffff;
     border-radius:15px; 
     padding:20px; 
     box-shadow: 0px 4px 20px rgba(0,0,0,0.08);
@@ -64,12 +64,12 @@ h1,h2,h3 {color:#1f2937; font-family: 'Segoe UI', sans-serif;}
     color: white;
 }
 
-/* Card for shortlist dashboard */
+/* Shortlist dashboard card */
 .card {
-    background-color: white;
+    background-color: #f9fafb;
     border-radius: 12px;
     padding: 15px;
-    box-shadow: 0px 4px 12px rgba(0,0,0,0.08);
+    box-shadow: 0px 4px 12px rgba(0,0,0,0.05);
     margin-bottom: 15px;
 }
 .card h4 {color:#1f77b4; margin-bottom:5px;}
@@ -272,21 +272,23 @@ if menu == "Shortlist Dashboard":
         ]
 
         st.write(f"Total Evaluations: {len(df_filtered)}")
-        
-        # Display in rectangular grid (2 columns per row)
-        cols = st.columns(2)
-        for idx, row in df_filtered.iterrows():
-            col = cols[idx % 2]
-            col.markdown(f"""
-            <div class="card">
-                <h4>Resume: {row['Resume']}</h4>
-                <p><b>Job:</b> {row['Job Title']}</p>
-                <p><b>Company:</b> {row['Company']}</p>
-                <p><b>Location:</b> {row['Location']}</p>
-                <p><b>Score:</b> {row['Score']} | <b>Verdict:</b> {row['Verdict']}</p>
-                {("<p><b>Missing Skills:</b></p><ul>" + "".join([f"<li>{i}</li>" for i in json.loads(row['Missing'])]) + "</ul>") if row['Missing'] else ""}
-            </div>
-            """, unsafe_allow_html=True)
+
+        # Display cards in 2-column grid
+        for i in range(0, len(df_filtered), 2):
+            cols = st.columns(2)
+            for j, col in enumerate(cols):
+                if i+j < len(df_filtered):
+                    row = df_filtered.iloc[i+j]
+                    col.markdown(f"""
+                    <div class="card">
+                        <h4>{row['Resume']}</h4>
+                        <p><b>Job:</b> {row['Job Title']}</p>
+                        <p><b>Company:</b> {row['Company']}</p>
+                        <p><b>Location:</b> {row['Location']}</p>
+                        <p><b>Score:</b> {row['Score']} | <b>Verdict:</b> {row['Verdict']}</p>
+                        {("<p><b>Missing Skills:</b></p><ul>" + "".join([f"<li>{i}</li>" for i in json.loads(row['Missing'])]) + "</ul>") if row['Missing'] else ""}
+                    </div>
+                    """, unsafe_allow_html=True)
 
 # -------------------- Help / Samples --------------------
 if menu == "Help / Samples":
