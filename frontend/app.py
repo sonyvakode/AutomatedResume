@@ -36,7 +36,7 @@ h1,h2,h3 {color:#1f2937; font-family: 'Segoe UI', sans-serif;}
 .stFileUploader>div {border: 2px dashed #1f77b4; border-radius: 10px; padding: 10px;}
 [data-testid="stSidebar"] > div:first-child {background-color: #1f77b4; color: white;}
 [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3, [data-testid="stSidebar"] label {color: white;}
-.stDataFrame table {border: 1px solid #ddd; border-radius: 6px;}
+.stDataFrame table {border: 1px solid #ddd; border-radius: 6px; font-weight: 600; color: #111;}
 .stDataFrame th {background-color: #2c3e50 !important; color: white !important; font-weight: 600 !important;}
 .stDataFrame tbody tr:nth-child(even) {background-color: #f9f9f9 !important;}
 .stDataFrame tbody tr:hover {background-color: #e6f7ff !important;}
@@ -173,9 +173,11 @@ if menu == "Students: Upload Resume":
                 final_score = scored['score']
                 verdict = scored['verdict']
 
-                # Concise suggestions only
+                # Concise suggestions only (max 2-3 lines)
                 if scored['verdict'] != 'High' and scored['missing']:
-                    suggestions = [f"Add: {', '.join(scored['missing'])}"]
+                    suggestions = [f"Missing skills: {', '.join(scored['missing'][:5])}"]  # top 5 skills only
+                elif scored['verdict'] != 'High':
+                    suggestions = ["Include key skills/projects."]
 
                 conn = sqlite3.connect(DB_PATH)
                 cur = conn.cursor()
@@ -184,7 +186,7 @@ if menu == "Students: Upload Resume":
                 conn.commit()
                 conn.close()
             else:
-                suggestions = ["Focus on key skills and relevant projects."]
+                suggestions = ["Include key skills and relevant projects."]
 
             st.subheader("Evaluation Results")
             if jd_available:
