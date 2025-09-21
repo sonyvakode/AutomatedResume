@@ -1,8 +1,14 @@
+# ---------------------- app.py ----------------------
+import sys, os
+
+# Ensure 'src' folder is in Python path
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
+
 import streamlit as st
-import os, io, json, sqlite3
+import io, json, sqlite3
 from pathlib import Path
-from src import parsers, matching, scorer, db
 import pandas as pd
+from src import parsers, matching, scorer, db
 
 # Initialize DB
 db.init_db()
