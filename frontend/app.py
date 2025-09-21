@@ -6,7 +6,6 @@ import io, json, sqlite3
 from pathlib import Path
 import pandas as pd
 from docx import Document
-from fuzzywuzzy import fuzz
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -15,13 +14,17 @@ os.makedirs('data/resumes', exist_ok=True)
 
 # -------------------- Page Config --------------------
 st.set_page_config(page_title="Automated Resume Relevance Dashboard", layout="wide")
+
 st.markdown("""
 <style>
-body {background-color: #f0f2f6;}
-section.main {background-color: #ffffff; border-radius:15px; padding:20px; box-shadow: 0px 0px 15px rgba(0,0,0,0.1);}
+body {background: linear-gradient(120deg, #f0f2f6 0%, #d9e2ef 100%);}
+section.main {background-color: #ffffff; border-radius:15px; padding:20px; box-shadow: 0px 4px 25px rgba(0,0,0,0.1);}
 h1,h2,h3{color:#1f77b4;}
+.stButton>button {background-color: #1f77b4; color: white;}
+.stFileUploader>div{border: 2px dashed #1f77b4; border-radius: 10px; padding: 10px;}
 </style>
 """, unsafe_allow_html=True)
+
 st.title("📄 Automated Resume Relevance Dashboard")
 
 menu = st.sidebar.selectbox(
@@ -70,17 +73,18 @@ if menu == "Placement Team: Upload JD":
     with st.form("jd_form"):
         title = st.text_input("Job Title")
         company = st.text_input("Company Name")
-        location = st.text_input("Location")
+        locations = ["Delhi NCR", "Bangalore", "Hyderabad", "Pune", "Chennai", "Mumbai"]
+        location = st.multiselect("Job Location(s)", options=locations, default=["Delhi NCR"])
         jd_txt = st.text_area("Paste JD text here", height=200)
         jd_file = st.file_uploader("Or upload JD file (.txt/.md)", type=['txt','md'])
         submitted = st.form_submit_button("Upload JD")
         if submitted:
             if jd_file is not None:
                 jd_txt = jd_file.getvalue().decode('utf-8', errors='ignore')
-            if not jd_txt.strip() or not title.strip() or not company.strip() or not location.strip():
+            if not jd_txt.strip() or not title.strip() or not company.strip() or not location:
                 st.error("Provide all details and JD content/file.")
             else:
-                jd_full_title = f"{title} | {company} | {location}"
+                jd_full_title = f"{title} | {company} | {', '.join(location)}"
                 conn = sqlite3.connect(DB_PATH)
                 cur = conn.cursor()
                 cur.execute("""
@@ -108,7 +112,6 @@ if menu == "Students: Upload Resume":
     conn.close()
 
     resume_file = st.file_uploader("Upload Resume (DOCX/TXT)", type=['docx','txt'])
-
     jd_available = len(jds) > 0
     jd_dict = {f"{row[1]} (ID:{row[0]})": (row[0], row[2]) for row in jds} if jd_available else {}
 
@@ -123,7 +126,6 @@ if menu == "Students: Upload Resume":
         with open(resume_path,'wb') as f:
             f.write(resume_file.getvalue())
 
-        # Resume Parsing
         if resume_file.name.endswith(".docx"):
             resume_text = extract_docx_text(resume_path)
         else:
@@ -140,7 +142,6 @@ if menu == "Students: Upload Resume":
             jd_parsed = parse_jd(jd_content)
             jd_text = normalize_text(jd_content)
 
-            # Hard & Semantic Match
             hard_score, missing = hard_match(resume_text, jd_parsed)
             sem_score = semantic_score(resume_text, jd_text)
             scored = compute_final_score(hard_score, sem_score)
@@ -154,7 +155,6 @@ if menu == "Students: Upload Resume":
                     suggestions.append(f"Missing skills/projects: {', '.join(scored['missing'])}")
                 suggestions.append("Add relevant certifications or projects to improve relevance.")
 
-            # Save evaluation
             conn = sqlite3.connect(DB_PATH)
             cur = conn.cursor()
             cur.execute("INSERT INTO evaluations (jd_id, resume_name, score, verdict, missing) VALUES (?, ?, ?, ?, ?)",
@@ -162,17 +162,15 @@ if menu == "Students: Upload Resume":
             conn.commit()
             conn.close()
         else:
-            # General suggestions when no JD
             suggestions.append("JD not posted yet. Focus on including key skills, projects, and certifications relevant to your field.")
 
-        # Display Results
         st.subheader("Evaluation Results")
         if jd_available:
             st.metric("Relevance Score", final_score)
             st.markdown(f"**Verdict:** <span style='color:{'green' if verdict=='High' else 'orange' if verdict=='Medium' else 'red'};'>{verdict}</span>", unsafe_allow_html=True)
         else:
             st.info("JD not available. General suggestions are provided below.")
-        
+
         if missing:
             st.write("Missing Skills/Projects/Certifications:")
             for item in missing:
@@ -203,47 +201,4 @@ if menu == "Shortlist Dashboard":
     if not evals:
         st.info("No evaluations yet.")
     else:
-        df = pd.DataFrame(evals, columns=["ID","JD Title","Resume","Score","Verdict","Missing"])
-        df[['Job Title','Company','Location']] = df['JD Title'].str.split('|', expand=True)
-        df = df.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
-        
-        # Filters
-        st.sidebar.subheader("Filters")
-        job_filter = st.sidebar.multiselect("Job Title", options=df['Job Title'].unique(), default=df['Job Title'].unique())
-        company_filter = st.sidebar.multiselect("Company", options=df['Company'].unique(), default=df['Company'].unique())
-        location_filter = st.sidebar.multiselect("Location", options=df['Location'].unique(), default=df['Location'].unique())
-        score_filter = st.sidebar.slider("Minimum Score", 0, 100, 0)
-        
-        df_filtered = df[
-            (df['Job Title'].isin(job_filter)) &
-            (df['Company'].isin(company_filter)) &
-            (df['Location'].isin(location_filter)) &
-            (df['Score'] >= score_filter)
-        ]
-
-        st.write(f"Total Evaluations: {len(df_filtered)}")
-        for idx, row in df_filtered.iterrows():
-            st.markdown(f"### Resume: {row['Resume']}")
-            st.markdown(f"**Job:** {row['Job Title']} | **Company:** {row['Company']} | **Location:** {row['Location']}")
-            st.markdown(f"**Score:** {row['Score']} | **Verdict:** "
-                        f"<span style='color:{'green' if row['Verdict']=='High' else 'orange' if row['Verdict']=='Medium' else 'red'};'>{row['Verdict']}</span>", 
-                        unsafe_allow_html=True)
-            if row['Missing']:
-                missing = json.loads(row['Missing'])
-                st.markdown("**Missing Skills/Projects/Certifications:**")
-                for item in missing:
-                    st.markdown(f"<span style='color:red; font-weight:bold'>● {item}</span>", unsafe_allow_html=True)
-            st.markdown("---")
-
-# -------------------- Help / Samples --------------------
-if menu == "Help / Samples":
-    st.header("Help & Sample Data")
-    st.write("Sample data included in `data/sample/`. Upload JD first, then student resumes to evaluate.")
-    sample_jd_path = Path('data/sample/job_description.txt')
-    sample_resume_path = Path('data/sample/sample_resume.txt')
-    if sample_jd_path.exists():
-        st.subheader("Sample JD")
-        st.code(sample_jd_path.read_text())
-    if sample_resume_path.exists():
-        st.subheader("Sample Resume")
-        st.code(sample_resume_path.read_text())
+        df = pd.DataFrame(evals, columns=["ID","JD Title","Resume","Score","Verd
