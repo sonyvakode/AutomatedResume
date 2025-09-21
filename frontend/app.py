@@ -201,4 +201,46 @@ if menu == "Shortlist Dashboard":
     if not evals:
         st.info("No evaluations yet.")
     else:
-        df = pd.DataFrame(evals, columns=["ID","JD Title","Resume","Score","Verd
+        df = pd.DataFrame(evals, columns=["ID","JD Title","Resume","Score","Verdict","Missing"])
+        df[['Job Title','Company','Location']] = df['JD Title'].str.split('|', expand=True)
+        df = df.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
+
+        st.sidebar.subheader("Filters")
+        job_filter = st.sidebar.multiselect("Job Title", options=df['Job Title'].unique(), default=df['Job Title'].unique())
+        company_filter = st.sidebar.multiselect("Company", options=df['Company'].unique(), default=df['Company'].unique())
+        location_filter = st.sidebar.multiselect("Location", options=df['Location'].unique(), default=df['Location'].unique())
+        score_filter = st.sidebar.slider("Minimum Score", 0, 100, 0)
+
+        df_filtered = df[
+            (df['Job Title'].isin(job_filter)) &
+            (df['Company'].isin(company_filter)) &
+            (df['Location'].isin(location_filter)) &
+            (df['Score'] >= score_filter)
+        ]
+
+        st.write(f"Total Evaluations: {len(df_filtered)}")
+        for idx, row in df_filtered.iterrows():
+            st.markdown(f"### Resume: {row['Resume']}")
+            st.markdown(f"**Job:** {row['Job Title']} | **Company:** {row['Company']} | **Location:** {row['Location']}")
+            st.markdown(f"**Score:** {row['Score']} | **Verdict:** "
+                        f"<span style='color:{'green' if row['Verdict']=='High' else 'orange' if row['Verdict']=='Medium' else 'red'};'>{row['Verdict']}</span>", 
+                        unsafe_allow_html=True)
+            if row['Missing']:
+                missing = json.loads(row['Missing'])
+                st.markdown("**Missing Skills/Projects/Certifications:**")
+                for item in missing:
+                    st.markdown(f"<span style='color:red; font-weight:bold'>● {item}</span>", unsafe_allow_html=True)
+            st.markdown("---")
+
+# -------------------- Help / Samples --------------------
+if menu == "Help / Samples":
+    st.header("Help & Sample Data")
+    st.write("Upload JD first, then student resumes to evaluate.")
+    sample_jd_path = Path('data/sample/job_description.txt')
+    sample_resume_path = Path('data/sample/sample_resume.txt')
+    if sample_jd_path.exists():
+        st.subheader("Sample JD")
+        st.code(sample_jd_path.read_text())
+    if sample_resume_path.exists():
+        st.subheader("Sample Resume")
+        st.code(sample_resume_path.read_text())
