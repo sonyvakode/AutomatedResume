@@ -15,12 +15,12 @@ os.makedirs('data/resumes', exist_ok=True)
 # -------------------- Page Config --------------------
 st.set_page_config(page_title="Automated Resume Relevance Dashboard", layout="wide")
 
-# -------------------- Custom Styling --------------------
+# -------------------- Custom CSS Styling --------------------
 st.markdown("""
 <style>
 /* Main section */
 section.main {
-    background-color: #f9f9f9;
+    background-color: #f8f9fa;
     border-radius:15px; 
     padding:20px; 
     box-shadow: 0px 4px 20px rgba(0,0,0,0.08);
