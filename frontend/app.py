@@ -15,13 +15,62 @@ os.makedirs('data/resumes', exist_ok=True)
 # -------------------- Page Config --------------------
 st.set_page_config(page_title="Automated Resume Relevance Dashboard", layout="wide")
 
-st.markdown("""
+# -------------------- Background & Sidebar Styling --------------------
+bg_image_path = "/mnt/data/2b4d37a2-8857-433e-a6be-8e569bd9798e.png"
+st.markdown(f"""
 <style>
-body {background: linear-gradient(120deg, #f0f2f6 0%, #d9e2ef 100%);}
-section.main {background-color: #ffffff; border-radius:15px; padding:20px; box-shadow: 0px 4px 25px rgba(0,0,0,0.1);}
-h1,h2,h3{color:#1f77b4;}
-.stButton>button {background-color: #1f77b4; color: white;}
-.stFileUploader>div{border: 2px dashed #1f77b4; border-radius: 10px; padding: 10px;}
+/* Main background */
+body {{
+    background: url('{bg_image_path}');
+    background-size: cover;
+    background-attachment: fixed;
+}}
+section.main {{
+    background-color: rgba(255,255,255,0.85);
+    border-radius:15px; 
+    padding:20px; 
+    box-shadow: 0px 4px 25px rgba(0,0,0,0.1);
+    backdrop-filter: blur(6px);
+}}
+h1,h2,h3{{color:#1f77b4;}}
+
+/* Buttons */
+.stButton>button {{
+    background-color: #1f77b4; 
+    color: white;
+    border-radius:8px;
+}}
+.stButton>button:hover {{
+    background-color: #145a8a;
+    color: white;
+    transform: scale(1.03);
+    transition: 0.2s;
+}}
+
+/* File uploader */
+.stFileUploader>div {{
+    border: 2px dashed #1f77b4; 
+    border-radius: 10px; 
+    padding: 10px;
+}}
+.stFileUploader>div:hover {{
+    border-color: #145a8a;
+}}
+
+/* Sidebar background */
+[data-testid="stSidebar"] > div:first-child {{
+    background: rgba(31, 119, 180, 0.85);
+    color: white;
+}}
+[data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3, [data-testid="stSidebar"] label {{
+    color: white;
+}}
+[data-testid="stSidebar"] .stSelectbox, 
+[data-testid="stSidebar"] .stMultiselect, 
+[data-testid="stSidebar"] .stSlider {{
+    background-color: rgba(255,255,255,0.15);
+    color: white;
+}}
 </style>
 """, unsafe_allow_html=True)
 
@@ -220,17 +269,21 @@ if menu == "Shortlist Dashboard":
 
         st.write(f"Total Evaluations: {len(df_filtered)}")
         for idx, row in df_filtered.iterrows():
-            st.markdown(f"### Resume: {row['Resume']}")
-            st.markdown(f"**Job:** {row['Job Title']} | **Company:** {row['Company']} | **Location:** {row['Location']}")
-            st.markdown(f"**Score:** {row['Score']} | **Verdict:** "
-                        f"<span style='color:{'green' if row['Verdict']=='High' else 'orange' if row['Verdict']=='Medium' else 'red'};'>{row['Verdict']}</span>", 
-                        unsafe_allow_html=True)
-            if row['Missing']:
-                missing = json.loads(row['Missing'])
-                st.markdown("**Missing Skills/Projects/Certifications:**")
-                for item in missing:
-                    st.markdown(f"<span style='color:red; font-weight:bold'>● {item}</span>", unsafe_allow_html=True)
-            st.markdown("---")
+            st.markdown(f"""
+            <div style="
+                background-color: rgba(255,255,255,0.9);
+                border-radius: 12px;
+                padding: 15px;
+                margin-bottom: 10px;
+                box-shadow: 0px 4px 12px rgba(0,0,0,0.15);
+            ">
+                <h3 style="color:#1f77b4;">Resume: {row['Resume']}</h3>
+                <p><b>Job:</b> {row['Job Title']} | <b>Company:</b> {row['Company']} | <b>Location:</b> {row['Location']}</p>
+                <p><b>Score:</b> {row['Score']} | <b>Verdict:</b> 
+                <span style='color:{'green' if row['Verdict']=='High' else 'orange' if row['Verdict']=='Medium' else 'red'};'>{row['Verdict']}</span></p>
+                {"<p><b>Missing Skills/Projects/Certifications:</b></p>" + "<ul>" + "".join([f"<li style='color:red;'>{i}</li>" for i in json.loads(row['Missing'])]) + "</ul>" if row['Missing'] else ""}
+            </div>
+            """, unsafe_allow_html=True)
 
 # -------------------- Help / Samples --------------------
 if menu == "Help / Samples":
